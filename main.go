@@ -3,16 +3,30 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"iter"
 	"os"
 	"sort"
 	"strings"
+	"sync"
 )
+
+var wg sync.WaitGroup
 
 func main() {
 	batchPath := "batches/Batch_0001"
-	if len(os.Args) > 1 {
+	destPath := "./output"
+	if len(os.Args) > 2 {
 		batchPath = os.Args[1]
+		destPath = os.Args[2]
+	} else {
+		panic("Not enought arguments")
+	}
+
+	if err := os.Mkdir(destPath, 0o777); err != nil {
+		if _, ok := err.(*os.PathError); !ok {
+			panic(err)
+		}
 	}
 
 	withIndex := flag.Bool("withindex", true, "If given, take files from QC, else from Scan")
@@ -32,6 +46,13 @@ func main() {
 		}
 		println(fullPath)
 	}
+
+	for i, deedPath := range iterDeeds(batchPath) {
+		wg.Add(1)
+		go CopyStartingDoctypesPerDeed(deedPath, destPath, *withIndex)
+		println(i)
+	}
+	wg.Wait()
 }
 
 type DoctypeInfo struct {
@@ -74,6 +95,54 @@ func traverseBatch(batchPath string) iter.Seq2[string, *DoctypeInfo] {
 			}
 		}
 	}
+}
+
+func iterDeeds(batchPath string) iter.Seq2[int, string] {
+	return func(yield func(int, string) bool) {
+		deeds, err := os.ReadDir(batchPath)
+		if err != nil {
+			return
+		}
+		for i, deed := range deeds {
+			deedPath := batchPath + "/" + deed.Name()
+			if !yield(i, deedPath) {
+				return
+			}
+		}
+	}
+}
+
+func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool) error {
+	defer wg.Done()
+	doctypes, err := getDoctypes(deedPath)
+	if err != nil {
+		return err
+	}
+	var sourcePath, destPath string
+	for _, doctype := range doctypes {
+		if withIndex {
+			sourcePath = strings.Join([]string{deedPath, "QC", doctype.IndexedName()}, "/")
+			destPath = strings.Join([]string{dest, doctype.IndexedName()}, "/")
+		} else {
+			sourcePath = strings.Join([]string{deedPath, "Scan", doctype.Name()}, "/")
+			destPath = strings.Join([]string{dest, doctype.Name()}, "/")
+		}
+		if reader, err := os.Open(sourcePath); err == nil {
+			defer reader.Close()
+			if writer, err := os.Create(destPath); err == nil {
+				defer writer.Close()
+				if _, err := io.Copy(writer, reader); err != nil {
+					return err
+				}
+				println(destPath)
+			} else {
+				panic(err)
+			}
+		} else {
+			return err
+		}
+	}
+	return nil
 }
 
 func getDoctypes(path string) ([]DoctypeInfo, error) {

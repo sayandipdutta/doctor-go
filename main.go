@@ -11,6 +11,11 @@ import (
 	"sync"
 )
 
+const (
+	INDEXED_FOLDER = "QC"
+	SCANNED_FOLDER = "Scan"
+)
+
 var wg sync.WaitGroup
 
 func main() {
@@ -50,7 +55,7 @@ func isDeed(path string) bool {
 		return false
 	}
 	for _, child := range children {
-		if child.IsDir() && (strings.Contains(child.Name(), "QC")) {
+		if child.IsDir() && (strings.Contains(child.Name(), INDEXED_FOLDER)) {
 			return true
 		}
 	}
@@ -64,7 +69,7 @@ func iterDeeds(rootPath string) iter.Seq[string] {
 			return
 		}
 		for _, child := range children {
-			childPath := rootPath + "/" + child.Name()
+			childPath := filepath.Join(rootPath, child.Name())
 			if isDeed(childPath) {
 				if !yield(childPath) {
 					return
@@ -95,10 +100,10 @@ func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, w
 	}
 	for _, doctype := range doctypes {
 		if withIndex {
-			sourcePath = filepath.Join(deedPath, "QC", doctype.IndexedName())
+			sourcePath = filepath.Join(deedPath, INDEXED_FOLDER, doctype.IndexedName())
 			destPath = filepath.Join(dest, doctype.IndexedName())
 		} else {
-			sourcePath = filepath.Join(deedPath, "Scan", doctype.Name())
+			sourcePath = filepath.Join(deedPath, SCANNED_FOLDER, doctype.Name())
 			destPath = filepath.Join(dest, doctype.Name())
 		}
 		if reader, err := os.Open(sourcePath); err == nil {

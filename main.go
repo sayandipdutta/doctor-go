@@ -6,6 +6,7 @@ import (
 	"io"
 	"iter"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -14,8 +15,7 @@ import (
 var wg sync.WaitGroup
 
 func main() {
-	batchPath := "batches/Batch_0001"
-	destPath := "./output"
+	var batchPath, destPath string
 	if len(os.Args) > 2 {
 		batchPath = os.Args[1]
 		destPath = os.Args[2]
@@ -23,35 +23,25 @@ func main() {
 		panic("Not enought arguments")
 	}
 
-	if err := os.Mkdir(destPath, 0o777); err != nil {
+	if err := os.Mkdir(filepath.Clean(destPath), 0o777); err != nil {
 		if _, ok := err.(*os.PathError); !ok {
 			panic(err)
 		}
 	}
 
 	withIndex := flag.Bool("withindex", true, "If given, take files from QC, else from Scan")
+	withBatch := flag.Bool("withbatch", true, "If given, copy deeds under their respective batch names")
 	flag.Parse()
 
-	doctypes := traverseBatch(batchPath)
-
-	var parent, fullPath string
-
-	for deedPath, doctype := range doctypes {
-		if *withIndex {
-			parent = "QC"
-			fullPath = strings.Join([]string{deedPath, parent, doctype.IndexedName()}, "/")
-		} else {
-			parent = "Scan"
-			fullPath = strings.Join([]string{deedPath, parent, doctype.Name()}, "/")
-		}
-		println(fullPath)
-	}
-
-	for i, deedPath := range iterDeeds(batchPath) {
+	println()
+	i := 1
+	for deedPath := range iterDeeds(batchPath) {
 		wg.Add(1)
-		go CopyStartingDoctypesPerDeed(deedPath, destPath, *withIndex)
-		println(i)
+		go CopyStartingDoctypesPerDeed(deedPath, destPath, *withIndex, *withBatch)
+		fmt.Printf("\r%d", i)
+		i++
 	}
+	println()
 	wg.Wait()
 }
 
@@ -79,17 +69,35 @@ func (entry *DoctypeInfo) IndexedName() string {
 	return sb.String()
 }
 
-func traverseBatch(batchPath string) iter.Seq2[string, *DoctypeInfo] {
-	return func(yield func(string, *DoctypeInfo) bool) {
-		if deeds, err := os.ReadDir(batchPath); err == nil {
-			for _, deed := range deeds {
-				if deed.IsDir() {
-					if doctypes, err := getDoctypes(batchPath + "/" + deed.Name()); err == nil {
-						for _, doctype := range doctypes {
-							if !yield(deed.Name(), &doctype) {
-								return
-							}
-						}
+func isDeed(path string) bool {
+	children, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	for _, child := range children {
+		if child.IsDir() && (strings.Contains(child.Name(), "QC")) {
+			return true
+		}
+	}
+	return false
+}
+
+func iterDeeds(rootPath string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		children, err := os.ReadDir(rootPath)
+		if err != nil {
+			return
+		}
+		for _, child := range children {
+			childPath := rootPath + "/" + child.Name()
+			if isDeed(childPath) {
+				if !yield(childPath) {
+					return
+				}
+			} else {
+				for deedPath := range iterDeeds(childPath) {
+					if !yield(deedPath) {
+						return
 					}
 				}
 			}
@@ -97,28 +105,19 @@ func traverseBatch(batchPath string) iter.Seq2[string, *DoctypeInfo] {
 	}
 }
 
-func iterDeeds(batchPath string) iter.Seq2[int, string] {
-	return func(yield func(int, string) bool) {
-		deeds, err := os.ReadDir(batchPath)
-		if err != nil {
-			return
-		}
-		for i, deed := range deeds {
-			deedPath := batchPath + "/" + deed.Name()
-			if !yield(i, deedPath) {
-				return
-			}
-		}
-	}
-}
-
-func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool) error {
+func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, withBatch bool) error {
 	defer wg.Done()
 	doctypes, err := getDoctypes(deedPath)
 	if err != nil {
 		return err
 	}
 	var sourcePath, destPath string
+	if withBatch {
+		dest = filepath.Join(dest, filepath.Base(filepath.Dir(deedPath)))
+		if _, err := os.Stat(dest); err != nil {
+			os.Mkdir(dest, 0o777)
+		}
+	}
 	for _, doctype := range doctypes {
 		if withIndex {
 			sourcePath = strings.Join([]string{deedPath, "QC", doctype.IndexedName()}, "/")
@@ -134,7 +133,6 @@ func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool) e
 				if _, err := io.Copy(writer, reader); err != nil {
 					return err
 				}
-				println(destPath)
 			} else {
 				panic(err)
 			}

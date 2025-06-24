@@ -146,8 +146,9 @@ func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch
 	}
 	topsheetName := ""
 	for _, entry := range entries {
-		desiredSuffix := fmt.Sprintf("-Others%s", filepath.Ext(entry.Name()))
-		if strings.HasSuffix(entry.Name(), desiredSuffix) {
+		desirableSuffix := fmt.Sprintf("-Others%s", filepath.Ext(entry.Name()))
+		undesirableSuffix := fmt.Sprintf("_A-Others%s", filepath.Ext(entry.Name()))
+		if !strings.HasSuffix(entry.Name(), undesirableSuffix) && strings.HasSuffix(entry.Name(), desirableSuffix) {
 			topsheetName = entry.Name()
 		}
 	}

@@ -19,10 +19,11 @@ const (
 var wg sync.WaitGroup
 
 func main() {
-	var sourcePath, destPath string
+	var sourcePath, destPath, taskType string
 
 	flag.StringVar(&sourcePath, "source", "", "Source path")
 	flag.StringVar(&destPath, "dest", "", "Destination path")
+	flag.StringVar(&taskType, "task", "doctype", "Type of task. Choices: doctype, topsheet")
 	withIndex := flag.Bool("withindex", false, "If given, take files from QC, else from Scan")
 	withBatch := flag.Bool("withbatch", false, "If given, copy deeds under their respective batch names")
 	flag.Parse()
@@ -36,17 +37,33 @@ func main() {
 		}
 	}
 
-	println()
-	i := 1
-	for deedPath := range iterDeeds(sourcePath) {
-		wg.Add(1)
-		go CopyStartingDoctypesPerDeed(deedPath, destPath, *withIndex, *withBatch)
-		fmt.Printf("\r%d", i)
-		i++
+	if taskType == "doctype" {
+		println()
+		i := 1
+		for deedPath := range iterDeeds(sourcePath) {
+			wg.Add(1)
+			go CopyStartingDoctypesPerDeed(deedPath, destPath, *withIndex, *withBatch)
+			fmt.Printf("\r%d", i)
+			i++
+		}
+		println()
+		wg.Wait()
+		println("Done!")
+	} else if taskType == "topsheet" {
+		println()
+		i := 1
+		for deedPath := range iterDeeds(sourcePath) {
+			wg.Add(1)
+			go CopyTopsheetPerDeed(deedPath, destPath, *withIndex, *withBatch)
+			fmt.Printf("\r%d", i)
+			i++
+		}
+		println()
+		wg.Wait()
+		println("Done!")
+	} else {
+		panic(fmt.Sprintf("Unknwon taskType: %s", taskType))
 	}
-	println()
-	wg.Wait()
-	println("Done!")
 }
 
 func isDeed(path string) bool {
@@ -89,7 +106,7 @@ func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, w
 	defer wg.Done()
 	doctypes, err := getDoctypes(deedPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("Could not get doctype %w", err)
 	}
 	var sourcePath, destPath string
 	if withBatch {
@@ -111,14 +128,62 @@ func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, w
 			if writer, err := os.Create(destPath); err == nil {
 				defer writer.Close()
 				if _, err := io.Copy(writer, reader); err != nil {
-					return err
+					return fmt.Errorf("Could not perform copy operation %w", err)
 				}
 			} else {
-				panic(err)
+				return fmt.Errorf("Could not create dest path %s -> %w", destPath, err)
 			}
 		} else {
-			return err
+			return fmt.Errorf("Could not open source path: %s -> %w", sourcePath, err)
 		}
+	}
+	return nil
+}
+
+func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch bool) error {
+	defer wg.Done()
+	if withBatch {
+		dest = filepath.Join(dest, filepath.Base(filepath.Dir(deedPath)))
+		if _, err := os.Stat(dest); err != nil {
+			os.Mkdir(dest, 0o777)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(deedPath, INDEXED_FOLDER))
+	if err != nil {
+		return fmt.Errorf("Could not read directory %s: %w", deedPath, err);
+	}
+	topsheetName := ""
+	for _, entry := range entries {
+		desiredSuffix := fmt.Sprintf("-Others%s", filepath.Ext(entry.Name()))
+		fmt.Printf("%s -> %s", entry.Name(), desiredSuffix)
+		if strings.HasSuffix(entry.Name(), desiredSuffix) {
+			topsheetName = entry.Name()
+		}
+	}
+	if topsheetName == "" {
+		return fmt.Errorf("topsheet not found in path %s", deedPath)
+	}
+	var sourcePath string;
+	if withIndex {
+		sourcePath = filepath.Join(deedPath, INDEXED_FOLDER, topsheetName);
+	} else {
+		topsheetName = strings.Replace(topsheetName, "-Others.", ".", 1)
+		sourcePath = filepath.Join(deedPath, SCANNED_FOLDER, topsheetName);
+	}
+	destPath := filepath.Join(dest, topsheetName);
+	fmt.Println("%s -> %s", sourcePath, destPath)
+	if reader, err := os.Open(sourcePath); err == nil {
+		defer reader.Close()
+		if writer, err := os.Create(destPath); err == nil {
+			defer writer.Close()
+			if _, err := io.Copy(writer, reader); err != nil {
+				return fmt.Errorf("Could not perform copy operation %w", err)
+			}
+		} else {
+			return fmt.Errorf("Could not create dest path %s -> %w", destPath, err)
+		}
+	} else {
+		return fmt.Errorf("Could not open source path: %s -> %w", sourcePath, err)
 	}
 	return nil
 }

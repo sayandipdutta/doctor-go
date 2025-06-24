@@ -37,33 +37,25 @@ func main() {
 		}
 	}
 
+	var taskFn func (string, string, bool, bool) error
 	if taskType == "doctype" {
-		println()
-		i := 1
-		for deedPath := range iterDeeds(sourcePath) {
-			wg.Add(1)
-			go CopyStartingDoctypesPerDeed(deedPath, destPath, *withIndex, *withBatch)
-			fmt.Printf("\r%d", i)
-			i++
-		}
-		println()
-		wg.Wait()
-		println("Done!")
+		taskFn = CopyStartingDoctypesPerDeed
 	} else if taskType == "topsheet" {
-		println()
-		i := 1
-		for deedPath := range iterDeeds(sourcePath) {
-			wg.Add(1)
-			go CopyTopsheetPerDeed(deedPath, destPath, *withIndex, *withBatch)
-			fmt.Printf("\r%d", i)
-			i++
-		}
-		println()
-		wg.Wait()
-		println("Done!")
+		taskFn = CopyTopsheetPerDeed
 	} else {
 		panic(fmt.Sprintf("Unknwon taskType: %s", taskType))
 	}
+	println()
+	i := 1
+	for deedPath := range iterDeeds(sourcePath) {
+		wg.Add(1)
+		go taskFn(deedPath, destPath, *withIndex, *withBatch)
+		fmt.Printf("\r%d", i)
+		i++
+	}
+	println()
+	wg.Wait()
+	println("Done!")
 }
 
 func isDeed(path string) bool {
@@ -155,7 +147,6 @@ func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch
 	topsheetName := ""
 	for _, entry := range entries {
 		desiredSuffix := fmt.Sprintf("-Others%s", filepath.Ext(entry.Name()))
-		fmt.Printf("%s -> %s", entry.Name(), desiredSuffix)
 		if strings.HasSuffix(entry.Name(), desiredSuffix) {
 			topsheetName = entry.Name()
 		}
@@ -171,7 +162,6 @@ func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch
 		sourcePath = filepath.Join(deedPath, SCANNED_FOLDER, topsheetName);
 	}
 	destPath := filepath.Join(dest, topsheetName);
-	fmt.Println("%s -> %s", sourcePath, destPath)
 	if reader, err := os.Open(sourcePath); err == nil {
 		defer reader.Close()
 		if writer, err := os.Create(destPath); err == nil {

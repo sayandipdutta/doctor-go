@@ -29,21 +29,31 @@ func main() {
 	flag.Parse()
 
 	if sourcePath == "" || destPath == "" {
-		panic("Invalid source and dest paths")
+		fmt.Println("both sourcePath and destPath must be provided!")
+		return
 	}
 	if err := os.Mkdir(filepath.Clean(destPath), 0o777); err != nil {
 		if _, ok := err.(*os.PathError); !ok {
 			panic(err)
 		}
 	}
+	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+		fmt.Println("Source path does not exist:", sourcePath)
+		return
+	}
 
-	var taskFn func (string, string, bool, bool) error
-	if taskType == "doctype" {
+	var taskFn func(string, string, bool, bool) error
+
+	switch taskType {
+	case "doctype":
 		taskFn = CopyStartingDoctypesPerDeed
-	} else if taskType == "topsheet" {
+	case "topsheet":
 		taskFn = CopyTopsheetPerDeed
-	} else {
-		panic(fmt.Sprintf("Unknwon taskType: %s", taskType))
+	default:
+		{
+			fmt.Println("unknown taskType:", taskType)
+			return
+		}
 	}
 	println()
 	i := 1
@@ -98,7 +108,7 @@ func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, w
 	defer wg.Done()
 	doctypes, err := getDoctypes(deedPath)
 	if err != nil {
-		return fmt.Errorf("Could not get doctype %w", err)
+		return fmt.Errorf("could not get doctype %w", err)
 	}
 	var sourcePath, destPath string
 	if withBatch {
@@ -120,13 +130,13 @@ func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, w
 			if writer, err := os.Create(destPath); err == nil {
 				defer writer.Close()
 				if _, err := io.Copy(writer, reader); err != nil {
-					return fmt.Errorf("Could not perform copy operation %w", err)
+					return fmt.Errorf("could not perform copy operation %w", err)
 				}
 			} else {
-				return fmt.Errorf("Could not create dest path %s -> %w", destPath, err)
+				return fmt.Errorf("could not create dest path %s -> %w", destPath, err)
 			}
 		} else {
-			return fmt.Errorf("Could not open source path: %s -> %w", sourcePath, err)
+			return fmt.Errorf("could not open source path: %s -> %w", sourcePath, err)
 		}
 	}
 	return nil
@@ -142,7 +152,7 @@ func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch
 	}
 	entries, err := os.ReadDir(filepath.Join(deedPath, INDEXED_FOLDER))
 	if err != nil {
-		return fmt.Errorf("Could not read directory %s: %w", deedPath, err);
+		return fmt.Errorf("could not read directory %s: %w", deedPath, err)
 	}
 	topsheetName := ""
 	for _, entry := range entries {
@@ -155,26 +165,26 @@ func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch
 	if topsheetName == "" {
 		return fmt.Errorf("topsheet not found in path %s", deedPath)
 	}
-	var sourcePath string;
+	var sourcePath string
 	if withIndex {
-		sourcePath = filepath.Join(deedPath, INDEXED_FOLDER, topsheetName);
+		sourcePath = filepath.Join(deedPath, INDEXED_FOLDER, topsheetName)
 	} else {
 		topsheetName = strings.Replace(topsheetName, "-Others.", ".", 1)
-		sourcePath = filepath.Join(deedPath, SCANNED_FOLDER, topsheetName);
+		sourcePath = filepath.Join(deedPath, SCANNED_FOLDER, topsheetName)
 	}
-	destPath := filepath.Join(dest, topsheetName);
+	destPath := filepath.Join(dest, topsheetName)
 	if reader, err := os.Open(sourcePath); err == nil {
 		defer reader.Close()
 		if writer, err := os.Create(destPath); err == nil {
 			defer writer.Close()
 			if _, err := io.Copy(writer, reader); err != nil {
-				return fmt.Errorf("Could not perform copy operation %w", err)
+				return fmt.Errorf("could not perform copy operation %w", err)
 			}
 		} else {
-			return fmt.Errorf("Could not create dest path %s -> %w", destPath, err)
+			return fmt.Errorf("could not create dest path %s -> %w", destPath, err)
 		}
 	} else {
-		return fmt.Errorf("Could not open source path: %s -> %w", sourcePath, err)
+		return fmt.Errorf("could not open source path: %s -> %w", sourcePath, err)
 	}
 	return nil
 }

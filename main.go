@@ -241,3 +241,4 @@ func getDoctypesCount(deedPath string, ch chan<- map[string]int) {
         }
     }
     ch <- doctypeMap
+}

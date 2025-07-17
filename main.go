@@ -1,6 +1,7 @@
 package main
 
 import (
+    "archive/zip"
     "flag"
     "fmt"
     "io"
@@ -27,6 +28,7 @@ func main() {
     stats := flag.Bool("stats", false, "If given, print doctype distribution and exit")
     withIndex := flag.Bool("withindex", false, "If given, take files from QC, else from Scan")
     withBatch := flag.Bool("withbatch", false, "If given, copy deeds under their respective batch names")
+    shouldZip := flag.Bool("zip", false, "If given, create zip archive from the output")
     flag.Parse()
 
     if sourcePath == "" {
@@ -52,7 +54,6 @@ func main() {
 	}
 
 	var taskFn func(string, string, bool, bool) error
-
 	switch taskType {
 	case "doctype":
 		taskFn = CopyStartingDoctypesPerDeed
@@ -74,6 +75,15 @@ func main() {
 	}
 	println()
 	wg.Wait()
+
+    if *shouldZip {
+        zipDestPath := filepath.Dir(destPath)
+        err := zipDoctypes(destPath, zipDestPath)
+        if err != nil {
+            fmt.Printf("Could not zip %s: %v\n", destPath, err)
+            return
+        }
+    }
 	println("Done!")
 }
 
@@ -135,19 +145,10 @@ func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, w
 			sourcePath = filepath.Join(deedPath, SCANNED_FOLDER, doctype.Name())
 			destPath = filepath.Join(dest, doctype.Name())
 		}
-		if reader, err := os.Open(sourcePath); err == nil {
-			defer reader.Close()
-			if writer, err := os.Create(destPath); err == nil {
-				defer writer.Close()
-				if _, err := io.Copy(writer, reader); err != nil {
-					return fmt.Errorf("could not perform copy operation %w", err)
-				}
-			} else {
-				return fmt.Errorf("could not create dest path %s -> %w", destPath, err)
-			}
-		} else {
-			return fmt.Errorf("could not open source path: %s -> %w", sourcePath, err)
-		}
+        err = CopyFile(sourcePath, destPath)
+        if err != nil {
+            fmt.Printf("Could not copy %s to %s", sourcePath, destPath)
+        }
 	}
 	return nil
 }
@@ -183,21 +184,10 @@ func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch
 		sourcePath = filepath.Join(deedPath, SCANNED_FOLDER, topsheetName)
 	}
 	destPath := filepath.Join(dest, topsheetName)
-	if reader, err := os.Open(sourcePath); err == nil {
-		defer reader.Close()
-		if writer, err := os.Create(destPath); err == nil {
-			defer writer.Close()
-			if _, err := io.Copy(writer, reader); err != nil {
-				return fmt.Errorf("could not perform copy operation %w", err)
-			}
-		} else {
-			return fmt.Errorf("could not create dest path %s -> %w", destPath, err)
-		}
-	} else {
-		return fmt.Errorf("could not open source path: %s -> %w", sourcePath, err)
-	}
-	return nil
+    err = CopyFile(sourcePath, destPath)
+    return err
 }
+
 
 func ComputeDistribution(sourcePath string) {
     allDoctypes := make(map[string]int)
@@ -241,4 +231,38 @@ func getDoctypesCount(deedPath string, ch chan<- map[string]int) {
         }
     }
     ch <- doctypeMap
+}
+
+func zipDoctypes(dirToZipPath string, dest string) error {
+    zipfileName := filepath.Base(dirToZipPath) + ".zip"
+    zipFile, err := os.Create(filepath.Join(dest, zipfileName))
+    if err != nil {
+        return fmt.Errorf("Failed to create zipfile %v", err);
+    }
+    defer zipFile.Close()
+
+    zipWriter := zip.NewWriter(zipFile);
+    defer zipWriter.Close()
+
+	entries, err := os.ReadDir(dirToZipPath)
+    if err != nil {
+        return fmt.Errorf("Could not read directory %v", err)
+    }
+    for _, fileName := range entries {
+        fileToZip, err := os.Open(filepath.Join(dirToZipPath, fileName.Name()))
+        if err != nil {
+            return fmt.Errorf("Could not open file %v", err)
+        }
+        defer fileToZip.Close()
+        writer, err := zipWriter.Create(fileName.Name())
+        if err != nil {
+            return fmt.Errorf("Could not create zip entry for file %v", err)
+        }
+
+        _, err = io.Copy(writer, fileToZip)
+        if err != nil {
+            return fmt.Errorf("Copy failed! %v", err)
+        }
+    }
+    return nil
 }

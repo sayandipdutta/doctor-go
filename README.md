@@ -5,7 +5,9 @@
 ### Install using `go`
 
 ```sh
-go install github.com/sayandipdutta/doctor-go.git
+go install github.com/sayandipdutta/doctor-go@latest
+# If you don't want to depend on GOPROXY to fetch the latest version:
+# GOPROXY=direct go install github.com/sayandipdutta/doctor-go@latest
 ```
 
 ### Build from source

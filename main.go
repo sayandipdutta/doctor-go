@@ -4,12 +4,16 @@ import (
     "archive/zip"
     "flag"
     "fmt"
+    "image"
     "io"
     "iter"
+    "log"
     "os"
     "path/filepath"
     "strings"
     "sync"
+    "image/jpeg"
+    _ "golang.org/x/image/tiff"
 )
 
 const (
@@ -29,6 +33,7 @@ func main() {
     withIndex := flag.Bool("withindex", false, "If given, take files from QC, else from Scan")
     withBatch := flag.Bool("withbatch", false, "If given, copy deeds under their respective batch names")
     shouldZip := flag.Bool("zip", false, "If given, create zip archive from the output")
+    convert := flag.Bool("conv", false, "If given, convert tif to jpeg")
     flag.Parse()
 
     if sourcePath == "" {
@@ -53,7 +58,7 @@ func main() {
 		return
 	}
 
-	var taskFn func(string, string, bool, bool) error
+	var taskFn func(string, string, bool, bool, bool) error
 	switch taskType {
 	case "doctype":
 		taskFn = CopyStartingDoctypesPerDeed
@@ -69,7 +74,7 @@ func main() {
 	i := 1
 	for deedPath := range iterDeeds(sourcePath) {
 		wg.Add(1)
-		go taskFn(deedPath, destPath, *withIndex, *withBatch)
+		go taskFn(deedPath, destPath, *withIndex, *withBatch, *convert)
 		fmt.Printf("\r%d", i)
 		i++
 	}
@@ -124,8 +129,24 @@ func iterDeeds(rootPath string) iter.Seq[string] {
     }
 }
 
-func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, withBatch bool) error {
+func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, withBatch bool, convert bool) error {
 	defer wg.Done()
+
+    var tempDir string
+
+    if convert {
+        var err error
+        tempDir, err = os.MkdirTemp("", "doctor-go-")
+        if err != nil {
+            return fmt.Errorf("Could not create tempdir: %v", err)
+        }
+        defer func () {
+            err := os.RemoveAll(tempDir)
+            if err != nil {
+                log.Printf("Could not remove tempfile %v", err)
+            }
+        }()
+    }
 	doctypes, err := getDoctypes(deedPath)
 	if err != nil {
 		return fmt.Errorf("could not get doctype %w", err)
@@ -145,6 +166,17 @@ func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, w
 			sourcePath = filepath.Join(deedPath, SCANNED_FOLDER, doctype.Name())
 			destPath = filepath.Join(dest, doctype.Name())
 		}
+        if convert {
+            rest, _ := strings.CutSuffix(sourcePath, filepath.Ext(sourcePath))
+            convertedSourcePath := filepath.Join(tempDir, filepath.Base(rest) + ".jpg")
+            err = imageConv(sourcePath, convertedSourcePath, ".tif", ".jpg")
+            if err != nil {
+                log.Printf("Could not convert image %v", err)
+            }
+            rest, _ = strings.CutSuffix(destPath, filepath.Ext(destPath))
+            destPath = rest + ".jpg"
+            sourcePath = convertedSourcePath
+        }
         err = CopyFile(sourcePath, destPath)
         if err != nil {
             fmt.Printf("Could not copy %s to %s", sourcePath, destPath)
@@ -153,8 +185,22 @@ func CopyStartingDoctypesPerDeed(deedPath string, dest string, withIndex bool, w
 	return nil
 }
 
-func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch bool) error {
+func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch bool, convert bool) error {
 	defer wg.Done()
+    var tempDir string
+
+    if convert {
+        tempDir, err := os.MkdirTemp("", "doctor-go-")
+        if err != nil {
+            return fmt.Errorf("Could not create tempdir: %v", err)
+        }
+        defer func () {
+            err := os.RemoveAll(tempDir)
+            if err != nil {
+                log.Printf("Could not remove tempfile %v", err)
+            }
+        }()
+    }
 	if withBatch {
 		dest = filepath.Join(dest, filepath.Base(filepath.Dir(deedPath)))
 		if _, err := os.Stat(dest); err != nil {
@@ -183,6 +229,17 @@ func CopyTopsheetPerDeed(deedPath string, dest string, withIndex bool, withBatch
 		topsheetName = strings.Replace(topsheetName, "-Others.", ".", 1)
 		sourcePath = filepath.Join(deedPath, SCANNED_FOLDER, topsheetName)
 	}
+    if convert {
+        rest, _ := strings.CutSuffix(sourcePath, filepath.Ext(sourcePath))
+        convertedSourcePath := filepath.Join(tempDir, filepath.Base(rest) + ".jpg")
+        err = imageConv(sourcePath, convertedSourcePath, ".tif", ".jpg")
+        if err != nil {
+            log.Printf("Could not convert image %v", err)
+        }
+        rest, _ = strings.CutSuffix(topsheetName, filepath.Ext(topsheetName))
+        topsheetName = rest + ".jpg"
+        sourcePath = convertedSourcePath
+    }
 	destPath := filepath.Join(dest, topsheetName)
     err = CopyFile(sourcePath, destPath)
     return err
@@ -264,5 +321,30 @@ func zipDoctypes(dirToZipPath string, dest string) error {
             return fmt.Errorf("Copy failed! %v", err)
         }
     }
+    return nil
+}
+
+func imageConv(sourcePath string, destPath string, fromFmt string, toFmt string) error {
+    tiffFile, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to open TIFF file: %v", err)
+	}
+	defer tiffFile.Close()
+
+	img, _, err := image.Decode(tiffFile)
+	if err != nil {
+		return fmt.Errorf("failed to decode TIFF: %v", err)
+	}
+
+	jpegFile, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create JPEG file: %v", err)
+	}
+	defer jpegFile.Close()
+
+	err = jpeg.Encode(jpegFile, img, &jpeg.Options{Quality: 80})
+	if err != nil {
+		return fmt.Errorf("failed to encode JPEG: %v", err)
+	}
     return nil
 }

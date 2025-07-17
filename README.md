@@ -22,13 +22,15 @@ go build -o doc main.go doctypes.go
 doctor-go \
     -source "<path/to/batch or path/containing/batches>" \
     [-stats] \
-    -dest "<output-dir-path>" [-task <taskname>] [-withindex, -withbatch, -zip]
+    -dest "<output-dir-path>" [-task <taskname>] [-withindex, -withbatch, -conv, -zip]
 ```
 
 If `-withindex` is given, filenames will contain document types.
 
 If `-withbatch` is given, document types of each deed in a batch will be put under
 a directory with the same name as batch.
+
+If `-conv` is given, the images will be saved in .jpeg format
 
 If `-zip` is given, the output directory will be zipped with the same name with
 .zip extension.
